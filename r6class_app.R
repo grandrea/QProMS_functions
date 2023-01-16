@@ -23,14 +23,14 @@ QProMS <- R6::R6Class(
     # parameters for normalization #
     normalized_data = NULL,
     norm_methods = NULL,
-    is_norm = NULL,
+    is_norm = FALSE,
     vsn_norm_run_once = FALSE,
     ############################
     # parameters for imputation #
     imputed_data = NULL,
     imp_methods = NULL,
     is_mixed = NULL,
-    is_imp = NULL,
+    is_imp = FALSE,
     imp_run_once = FALSE,
     #################
     # parameters For Statistics #
@@ -69,6 +69,10 @@ QProMS <- R6::R6Class(
         dplyr::mutate(replicate = stringr::str_remove(label, ".*_"))
       
       self$define_colors()
+      
+      if(self$input_type == "max_quant"){
+        self$pg_preprocessing()
+      }
     },
     define_tests = function(){
       conditions <-
@@ -761,6 +765,7 @@ QProMS <- R6::R6Class(
       cond_2 <- stringr::str_split(test, "_vs_")[[1]][2]
       
       self$univariate <- TRUE
+      self$fold_change <- fc
       
       mat <- data %>%
         dplyr::filter(condition == cond_1 | condition == cond_2) %>%

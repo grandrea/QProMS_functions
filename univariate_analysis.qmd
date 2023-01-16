@@ -1,0 +1,268 @@
+---
+title: "Univariate analysis"
+format:
+  html:
+    self-contained: true
+    theme: flatly
+    page-layout: article
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    smooth-scroll: true
+execute:
+  echo: false
+  warning: false
+  message: false
+editor: source
+---
+
+# Input data
+
+Caricare le librerie e le funzioni necessarie
+
+```{r loadin-libreries, echo=FALSE}
+library(data.table)
+library(janitor)
+library(here)
+library(dplyr)
+library(stringr)
+library(echarts4r)
+library(reactable)
+library(htmltools)
+library(ComplexHeatmap)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(gt)
+library(visNetwork)
+library(ggplot2)
+library(vsn)
+
+source(file = here::here("r6class_app.R"))
+
+# generare l'oggetto
+r6 <- QProMS$new()
+```
+
+caricare il proteinGroups.txt, inserire il path completo.
+
+```{r loading-data}
+r6$loading_data(
+  input_path = "some/path/proteinGroups.txt",
+  input_type = "max_quant" 
+)
+```
+
+questa funzione crea l'experimental design, ma il proteinGroups.txt deve essere creato con la colonna experiment in MaxQuant impostata come:
+
+condA_1
+condA_2
+condA_3
+condB_1
+condB_2
+condB_3
+
+```{r make-expdesig}
+r6$make_expdesign(
+  start_with = "lfq_intensity_"
+)
+```
+
+# Data Wrangling
+
+questa funzione serve per filtrare il proteinGroups.txt
+con i primi parametri si gestisce il numero di valid values e le opzioni che si possono scegliere sono:
+
+alog = at least one group
+each_grp = in each group
+total = in total
+
+i secondi 2 parametri servono per filtrare i peptidi, si possono usare le seguenti colonne:
+
+peptides = peptides column
+unique = unique columns
+razor = razor and unique column
+
+gli ultimi 3 filtano via (con TRUE) i potential contaminant, gli only identify by side e i reverse
+
+```{r data-wrangling}
+r6$data_wrangling(
+  valid_val_filter = "alog",
+  valid_val_thr = 0.75,
+  pep_filter = "peptides",
+  pep_thr = 2,
+  rev = TRUE,
+  cont = TRUE,
+  oibs = TRUE
+)
+```
+
+questo grafico mostra il risultato dei filtri sopra selezionati
+
+```{r protein-counts}
+r6$plot_protein_counts() 
+```
+
+ora bisogna verificare che le distribuzioni siano normali 
+
+# Normalization
+
+```{r plot-dis}
+r6$plot_distribution()
+```
+
+nel caso le distribuzioni non siano normali, è possibile noralizzarle con la seguente funzione:
+per ora c'è solo l'opzione con la vsn
+
+```{r norm}
+r6$normalization(norm_methods = "None")
+```
+
+# Missing data
+
+ora bisogna decidere come imputare i missing data rimanenti, utilizzare i seguenti plot per decidere:
+
+```{r plot-missval}
+r6$plot_protein_coverage()
+r6$plot_missing_data()
+r6$plot_missval_distribution()
+```
+
+# Imputation
+
+per imputare i dati usare la seguente funzione, si puo scegliere tra mixed e perseus
+
+```{r imp}
+r6$imputation(
+  imp_methods = "mixed",
+  shift = 1.8,
+  scale = 0.3
+)
+```
+
+per vedere l'effetto dell'imputazione
+
+```{r plot-imputation}
+r6$plot_imputation()
+```
+
+# Correlation plot
+
+```{r plot-corr}
+r6$plot_correlation()
+```
+
+# PCA plot
+
+```{r pca}
+r6$plot_pca(view_3d = FALSE)
+```
+
+# statistics
+
+specificare il test o i test che si vogliono attuare.
+la struttura da mettere nel test è sempre formata da:
+condA_vs_condB
+
+```{r tests}
+## single test format
+tests <- "condA_vs_condB"
+
+## multiple test format
+tests <- c("condA_vs_condB", "condA_vs_condC")
+
+## se si vuole una lista di tutte le possibili conbinazioni usare la seguente funzione:
+r6$define_tests()
+```
+
+è possibile cambiare i parametri come si desidera.
+raccomando di utilizzare sempre il dataset imputato come di default, ma volendo si puo usare anche quello con i missing data che si chiama:
+r6$normalized_data
+
+```{r uni-single}
+r6$stat_t_test(
+  data = r6$imputed_data,
+  test = tests,
+  fc = 1,
+  alpha = 0.05
+)
+```
+
+per vedere la tabella risultate per adesso non ho creato una funzione, ma ecco come visualizzarla:
+
+```{r result-table}
+r6$stat_table %>% View()
+```
+
+volcano plot:
+se si vuole vedere un gene in particolare o una lista di geni sostituire il NULL in highlights_names con il gene di interesse
+
+```{r plot-volcano}
+r6$plot_volcano(test = tests, highlights_names = NULL)
+```
+
+# Functional analysis
+
+## ORA
+
+o possibile selezionare BP per biological process, CC per cellular component e MF per molecolar funtions.
+il parametro max_row determina quanto deve essere grande al massimo il risultato finale, più è piccolo il numero meno sono ridondanti i termini e viceversa.
+
+```{r ora}
+ora_go_bp <-
+  r6$go_ora(
+    org_db = org.Hs.eg.db,
+    ontology = "BP",
+    alpha = 0.05,
+    max_row = 20
+  )
+```
+
+plot ora:
+
+```{r plot-ora}
+r6$plot_ora(ora_go_bp, test = tests)
+```
+
+## GSEA
+
+```{r gsea}
+gsea_go_bp <-
+  r6$gsea_go(
+    org_db = org.Hs.eg.db,
+    ontology = "BP",
+    pvalue_cutoff = 0.05,
+    max_row = 20
+  )
+```
+
+plot gsea:
+
+```{r}
+r6$plot_gsea(gsea_go_bp, test = tests)
+```
+
+# Network analysis
+
+non posso mettere questa parte in una funzione, ma il codice è abbastanza esplicativo:
+
+```{r net-single, echo=FALSE}
+visNetwork(
+  nodes = r6$make_nodes(ora_table = ora_go_bp, test = tests),
+  edges = r6$make_edges(ora_table = ora_go_bp, test = tests),
+  height = "700px",
+  width = "100%"
+) %>%
+  visIgraphLayout(layout = "layout_nicely", randomSeed = 1) %>%
+  visOptions(
+    selectedBy = list(variable = "group"),
+    highlightNearest = list(
+      enabled = TRUE,
+      degree = 1,
+      hover = TRUE
+    ),
+    nodesIdSelection = TRUE
+  ) %>%
+  visPhysics(stabilization = TRUE) %>%
+  visEdges(smooth = FALSE)
+```
+
